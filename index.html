@@ -176,8 +176,8 @@ footer{background:#fffdf6!important;border-top:2px dashed #cbd9c0!important;colo
   #modeControlsInner>div:first-child{width:100%;display:flex;flex-wrap:wrap;gap:4px!important;justify-content:center}
   #modeControlsInner>div:first-child button{font-size:13px!important;min-height:42px;padding-inline:10px!important}
   #speedToggleBtn{font-size:13px!important}
-  #cardsGrid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:13px!important}
-  #cardsGrid article .aspect-\[4\/3\]{aspect-ratio:1/1!important}
+  #cardsGrid{grid-template-columns:minmax(0,1fr)!important;gap:16px!important}
+  #cardsGrid article .aspect-\[4\/3\]{aspect-ratio:4/3!important}
   #cardsGrid article [data-card-img]{width:100%;height:100%;object-fit:cover}
   #cardsGrid article h3{font-size:1.35rem!important;line-height:1.4!important}
   #cardsGrid article [data-card-fallback-overlay] .font-maru{font-size:1.4rem!important}
@@ -195,6 +195,19 @@ footer{background:#fffdf6!important;border-top:2px dashed #cbd9c0!important;colo
   #cardsGrid{gap:9px!important}
   #cardsGrid article h3{font-size:1.25rem!important}
   #modeControlsInner>div:first-child button{font-size:12px!important;padding-inline:8px!important}
+}
+/* Mobile: one card per screen, swipe left/right to change card; no image badges. */
+#mobileCardNav{display:none}
+@media(max-width:760px){
+  #cardsGrid [data-card-img-badge],#cardsGrid [data-card-audio-badge]{display:none!important}
+  #cardsGrid{display:flex!important;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:16px!important}
+  #cardsGrid::-webkit-scrollbar{display:none}
+  #cardsGrid>*{flex:0 0 100%;min-width:0;scroll-snap-align:center;scroll-snap-stop:always}
+  #mobileCardNav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
+  #mobileCardNav[hidden]{display:none!important}
+  #mobileCardNav button{min-height:44px;min-width:96px;padding:0 14px;border-radius:14px;border:2px solid #d9e5d1;background:#fffef9;color:#1e3a5f;font-weight:800;font-size:15px;touch-action:manipulation}
+  #mobileCardNav button:disabled{opacity:.35}
+  #mobileCardNavLabel{font-weight:800;font-size:15px;color:#1e3a5f;font-variant-numeric:tabular-nums}
 }
 </style>
 
@@ -17215,5 +17228,74 @@ window.submitQuizAnswer=function(selectedId){const q=state.quiz;if(q?.currentIte
 function initNewLearningModes(){traceSetScript('hiragana');compareRenderPicker();compareRenderBoard();reviewUpdateBadge();reviewRefreshSummary();setMobileModeNavCollapsed(true);}
 window.addEventListener('DOMContentLoaded',initNewLearningModes);
 
+</script>
+<script>
+/* Mobile swipe carousel for #cardsGrid: position indicator, prev/next, keep current card across re-renders. */
+(function () {
+  var mq = window.matchMedia('(max-width:760px)');
+  var grid = document.getElementById('cardsGrid');
+  if (!grid) return;
+  var stale = document.getElementById('mobileCardNav');
+  if (stale) stale.remove(); /* exported copies may contain a saved nav */
+  var nav = document.createElement('div');
+  nav.id = 'mobileCardNav';
+  nav.hidden = true;
+  nav.innerHTML = '<button type="button" data-dir="-1" aria-label="上一張">‹ 上一張</button>' +
+    '<span id="mobileCardNavLabel" aria-live="polite"></span>' +
+    '<button type="button" data-dir="1" aria-label="下一張">下一張 ›</button>';
+  grid.insertAdjacentElement('afterend', nav);
+  var label = nav.querySelector('#mobileCardNavLabel');
+  var prev = nav.querySelector('[data-dir="-1"]');
+  var next = nav.querySelector('[data-dir="1"]');
+  var currentId = null, raf = 0;
+
+  function cards() { return Array.prototype.filter.call(grid.children, function (c) { return c.tagName === 'ARTICLE'; }); }
+  function idOf(card) { var img = card && card.querySelector('[data-card-img]'); return img ? img.getAttribute('data-card-img') : null; }
+  function offsetOf(card) { return grid.scrollLeft + card.getBoundingClientRect().left - grid.getBoundingClientRect().left; }
+  function currentIndex(list) {
+    var g = grid.getBoundingClientRect().left, best = 0, bd = Infinity;
+    for (var i = 0; i < list.length; i++) {
+      var d = Math.abs(list[i].getBoundingClientRect().left - g);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  function update() {
+    raf = 0;
+    var list = cards();
+    if (!mq.matches || !list.length) { nav.hidden = true; return; }
+    nav.hidden = false;
+    var i = currentIndex(list);
+    currentId = idOf(list[i]);
+    label.textContent = (i + 1) + ' / ' + list.length;
+    prev.disabled = i <= 0;
+    next.disabled = i >= list.length - 1;
+  }
+  function schedule() { if (!raf) raf = requestAnimationFrame(update); }
+  function go(dir) {
+    var list = cards();
+    if (!list.length) return;
+    var i = Math.max(0, Math.min(list.length - 1, currentIndex(list) + dir));
+    grid.scrollTo({ left: offsetOf(list[i]), behavior: 'smooth' });
+  }
+  function onRender() {
+    if (mq.matches) {
+      var list = cards(), target = null;
+      for (var i = 0; i < list.length; i++) { if (idOf(list[i]) === currentId) { target = list[i]; break; } }
+      grid.scrollLeft = target ? offsetOf(target) : 0;
+    }
+    update();
+  }
+
+  nav.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-dir]');
+    if (b) go(Number(b.getAttribute('data-dir')));
+  });
+  grid.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule);
+  if (mq.addEventListener) mq.addEventListener('change', onRender); else if (mq.addListener) mq.addListener(onRender);
+  new MutationObserver(onRender).observe(grid, { childList: true });
+  update();
+})();
 </script>
 </body></html>
